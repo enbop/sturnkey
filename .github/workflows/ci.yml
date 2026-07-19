@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Set up Wasmtime
+        uses: bytecodealliance/actions/wasmtime/setup@9152e710e9f7182e4c29ad218e4f335a7b203613 # v1
+        with:
+          version: 42.0.1
+
+      - name: Set up wasm-tools
+        uses: bytecodealliance/actions/wasm-tools/setup@9152e710e9f7182e4c29ad218e4f335a7b203613 # v1
+        with:
+          version: 1.235.0
+
+      - name: Cache build dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/dev/cpm-cache
+          key: ${{ runner.os }}-cpm-${{ hashFiles('.gitmodules', 'vendor/StarlingMonkey/Cargo.lock', 'vendor/StarlingMonkey/cmake/*.cmake') }}
+
+      - name: Configure
+        run: cmake --preset dev
+
+      - name: Build runtime
+        run: cmake --build --preset dev --target sturnkey
+
+      - name: Check formatting
+        run: cmake --build --preset dev --target format-check
+
+      - name: Test dynamic JavaScript
+        run: ctest --preset dev --output-on-failure
+
+      - name: Validate component
+        run: wasm-tools validate build/dev/sturnkey.wasm
+
+      - name: Upload runtime
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sturnkey-${{ github.sha }}
+          path: build/dev/sturnkey.wasm
+          if-no-files-found: error

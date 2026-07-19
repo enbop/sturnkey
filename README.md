@@ -1,5 +1,7 @@
 # Sturnkey
 
+[![CI](https://github.com/enbop/sturnkey/actions/workflows/ci.yml/badge.svg)](https://github.com/enbop/sturnkey/actions/workflows/ci.yml)
+
 Sturnkey is a lightweight JavaScript runtime for CLI, daemon, and local web
 applications on WASI. It is built as a downstream extension of
 [StarlingMonkey](https://github.com/bytecodealliance/StarlingMonkey) and is
@@ -37,6 +39,10 @@ cmake --build --preset dev --target sturnkey
 ```
 
 The result is `build/dev/sturnkey.wasm`.
+
+CI builds and tests the same artifact on every pull request and push to `main`,
+then makes `sturnkey.wasm` available as a workflow artifact. Tags beginning
+with `v` build an optimized component and publish it in a GitHub release.
 
 ## Run dynamic JavaScript
 

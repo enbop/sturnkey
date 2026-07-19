@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Set up Wasmtime
+        uses: bytecodealliance/actions/wasmtime/setup@9152e710e9f7182e4c29ad218e4f335a7b203613 # v1
+        with:
+          version: 42.0.1
+
+      - name: Set up wasm-tools
+        uses: bytecodealliance/actions/wasm-tools/setup@9152e710e9f7182e4c29ad218e4f335a7b203613 # v1
+        with:
+          version: 1.235.0
+
+      - name: Configure
+        run: cmake --preset release
+
+      - name: Build runtime
+        run: cmake --build --preset release --target sturnkey
+
+      - name: Test and validate
+        run: |
+          ctest --preset release --output-on-failure
+          wasm-tools validate build/release/sturnkey.wasm
+
+      - name: Package release
+        run: |
+          mkdir dist
+          cp build/release/sturnkey.wasm LICENSE NOTICE dist/
+          cd dist
+          sha256sum sturnkey.wasm LICENSE NOTICE > SHA256SUMS
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/sturnkey.wasm
+            dist/LICENSE
+            dist/NOTICE
+            dist/SHA256SUMS

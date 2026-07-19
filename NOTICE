@@ -1,0 +1,10 @@
+Sturnkey
+Copyright 2026 Sturnkey contributors
+
+This product includes software developed by the Bytecode Alliance and
+StarlingMonkey contributors. StarlingMonkey is distributed under the Apache
+License 2.0 with LLVM exceptions. See vendor/StarlingMonkey/LICENSE.
+
+Sturnkey is an independent project and is not affiliated with Deno Land Inc.
+Its public API design may draw inspiration from documented Deno APIs without
+claiming compatibility.

@@ -17,13 +17,23 @@ not provide Node.js or npm compatibility.
 
 ## Status
 
-Sturnkey is in early development. The first milestone is a reproducible
-runtime build that loads JavaScript dynamically. Promise-based WASI filesystem,
-TCP, CLI, and HTTP server APIs will follow in small, tested increments.
+Sturnkey is in early development. It currently loads JavaScript dynamically,
+supports the CLI asynchronous lifecycle, and exposes capability-based
+filesystem and asynchronous TCP client/listener APIs. HTTP server APIs and
+network hardening will follow in tested increments.
 
-The current runtime already loads JavaScript at execution time and exposes a
-small `sturnkey:runtime` builtin. It does not yet expose Sturnkey filesystem or
-socket APIs.
+The repository also contains experimental JavaScript-only HTTP/1.1 helpers, a
+static file server, and a server-rendered Web App. These are application proofs,
+not yet a stable HTTP framework.
+
+An experimental SOCKS5 proxy demonstrates domain lookup, outbound TCP,
+bidirectional relay, and half-close entirely from dynamic JavaScript.
+
+The `sturnkey:runtime` builtin provides command-line arguments and a
+Promise-based monotonic `sleep()` API. The `sturnkey:fs` builtin provides byte
+and UTF-8 file I/O plus basic directory operations inside Wasmtime preopens.
+The `sturnkey:net` builtin supports numeric-IPv4 TCP clients and foreground
+listeners over `wasi:sockets`.
 
 ## Build
 
@@ -48,8 +58,9 @@ with `v` build an optimized component and publish it in a GitHub release.
 
 ```js
 // main.js
-import { version } from "sturnkey:runtime";
+import { sleep, version } from "sturnkey:runtime";
 
+await sleep(100);
 console.log(`Hello from Sturnkey ${version}`);
 ```
 
@@ -90,6 +101,13 @@ vendor/StarlingMonkey/   Pinned upstream submodule
 ```
 
 See [UPSTREAM.md](UPSTREAM.md) for dependency and update policy.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the staged implementation plan and
+acceptance criteria.
+See [docs/api/runtime.md](docs/api/runtime.md) for the current JavaScript API.
+See [docs/api/filesystem.md](docs/api/filesystem.md) for the filesystem API and
+[docs/api/network.md](docs/api/network.md) for TCP capabilities.
+See [docs/http.md](docs/http.md) for the experimental HTTP application layer.
+See [docs/socks5.md](docs/socks5.md) for the SOCKS5 application proof.
 
 ## License
 

@@ -47,7 +47,7 @@
       "configurePreset": "dev",
       "filter": {
         "include": {
-          "name": "^dynamic-js$"
+          "name": "^(async-invalid|async-rejection|async-sleep|dynamic-js|filesystem|http-file-server|http-web-app|socks5|tcp-client|tcp-listener)$"
         }
       },
       "output": {
@@ -59,7 +59,7 @@
       "configurePreset": "release",
       "filter": {
         "include": {
-          "name": "^dynamic-js$"
+          "name": "^(async-invalid|async-rejection|async-sleep|dynamic-js|filesystem|http-file-server|http-web-app|socks5|tcp-client|tcp-listener)$"
         }
       },
       "output": {

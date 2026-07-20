@@ -27,9 +27,19 @@ set(BUILD_TESTING OFF CACHE BOOL "Build upstream tests" FORCE)
 add_subdirectory("${STARLINGMONKEY_SOURCE}" "${STARLINGMONKEY_BINARY_DIR}")
 include("${STARLINGMONKEY_SOURCE}/cmake/add_builtin.cmake")
 
-add_builtin(sturnkey::runtime SRC runtime/src/runtime.cpp)
+add_builtin(
+  sturnkey::runtime
+  SRC runtime/src/runtime.cpp
+  INCLUDE_DIRS "${STARLINGMONKEY_SOURCE}/host-apis/wasi-0.2.10/bindings"
+  DEPENDENCIES host_api)
 target_compile_definitions(
   ${LIB_NAME} PRIVATE STURNKEY_VERSION="${PROJECT_VERSION}")
+add_builtin(sturnkey::filesystem SRC runtime/src/filesystem.cpp)
+add_builtin(
+  sturnkey::network
+  SRC runtime/src/network.cpp
+  INCLUDE_DIRS "${STARLINGMONKEY_SOURCE}/host-apis/wasi-0.2.10/bindings"
+  DEPENDENCIES host_api)
 
 set(STURNKEY_WASM "${CMAKE_BINARY_DIR}/sturnkey.wasm")
 add_custom_command(
@@ -37,7 +47,7 @@ add_custom_command(
   COMMAND
     "${CMAKE_COMMAND}" -E copy_if_different
     "${STARLINGMONKEY_BINARY_DIR}/starling.wasm" "${STURNKEY_WASM}"
-  DEPENDS starling
+  DEPENDS starling "${STARLINGMONKEY_BINARY_DIR}/starling.wasm"
   COMMENT "Creating sturnkey.wasm"
   VERBATIM)
 add_custom_target(sturnkey ALL DEPENDS "${STURNKEY_WASM}")
@@ -48,6 +58,8 @@ if(CLANG_FORMAT_EXECUTABLE)
     format-check
     COMMAND "${CLANG_FORMAT_EXECUTABLE}" --dry-run --Werror
             "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/runtime.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/filesystem.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/network.cpp"
     COMMENT "Checking Sturnkey C++ formatting"
     VERBATIM)
 endif()
@@ -66,6 +78,106 @@ if(STURNKEY_BUILD_TESTING)
     set_tests_properties(
       dynamic-js PROPERTIES PASS_REGULAR_EXPRESSION
                             "Hello from Sturnkey 0.1.0")
+
+    add_test(
+      NAME async-sleep
+      COMMAND
+        "${WASMTIME_EXECUTABLE}" -S http --dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${STURNKEY_WASM}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/async-sleep.js")
+    set_tests_properties(
+      async-sleep PROPERTIES PASS_REGULAR_EXPRESSION
+                             "async sleep completed")
+
+    add_test(
+      NAME async-invalid
+      COMMAND
+        "${WASMTIME_EXECUTABLE}" -S http --dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${STURNKEY_WASM}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/async-invalid.js")
+    set_tests_properties(
+      async-invalid PROPERTIES PASS_REGULAR_EXPRESSION
+                               "invalid sleep arguments rejected")
+
+    add_test(
+      NAME async-rejection
+      COMMAND
+        bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/expect-failure.sh"
+        "expected top-level rejection" "${WASMTIME_EXECUTABLE}" -S http --dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${STURNKEY_WASM}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/async-rejection.js")
+
+    set(FILESYSTEM_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/filesystem-test")
+    file(MAKE_DIRECTORY "${FILESYSTEM_TEST_DIR}")
+    add_test(
+      NAME filesystem
+      COMMAND
+        "${WASMTIME_EXECUTABLE}" -S http --dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests" --dir
+        "${FILESYSTEM_TEST_DIR}::/sandbox" "${STURNKEY_WASM}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/filesystem.js")
+    set_tests_properties(
+      filesystem PROPERTIES PASS_REGULAR_EXPRESSION
+                            "filesystem capability test completed")
+
+    find_program(NODE_EXECUTABLE NAMES node)
+    if(NODE_EXECUTABLE)
+      add_test(
+        NAME tcp-client
+        COMMAND
+          "${NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/tcp-client.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/tcp-client.js")
+      set_tests_properties(
+        tcp-client PROPERTIES PASS_REGULAR_EXPRESSION
+                              "tcp client test completed" TIMEOUT 20)
+
+      add_test(
+        NAME tcp-listener
+        COMMAND
+          "${NODE_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/tcp-listener.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/tcp-listener.js")
+      set_tests_properties(
+        tcp-listener PROPERTIES PASS_REGULAR_EXPRESSION
+                                "tcp listener test completed" TIMEOUT 30)
+
+      add_test(
+        NAME http-file-server
+        COMMAND
+          "${NODE_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/http-file-server.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+      set_tests_properties(
+        http-file-server PROPERTIES PASS_REGULAR_EXPRESSION
+                                    "HTTP file server test completed" TIMEOUT 30)
+
+      add_test(
+        NAME http-web-app
+        COMMAND
+          "${NODE_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/http-web-app.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+      set_tests_properties(
+        http-web-app PROPERTIES PASS_REGULAR_EXPRESSION
+                                "HTTP web app test completed" TIMEOUT 30)
+
+      add_test(
+        NAME socks5
+        COMMAND
+          "${NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/socks5.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+      set_tests_properties(
+        socks5 PROPERTIES PASS_REGULAR_EXPRESSION
+                          "SOCKS5 proxy test completed" TIMEOUT 30)
+    endif()
   else()
     message(WARNING "Wasmtime not found; runtime tests are disabled")
   endif()

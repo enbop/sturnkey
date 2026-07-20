@@ -30,6 +30,12 @@ const char *socket_error_code(wasi_sockets_tcp_error_code_t error) {
     return "ECONNRESET";
   case WASI_SOCKETS_NETWORK_ERROR_CODE_CONNECTION_ABORTED:
     return "ECONNABORTED";
+  case WASI_SOCKETS_NETWORK_ERROR_CODE_NAME_UNRESOLVABLE:
+    return "ENOTFOUND";
+  case WASI_SOCKETS_NETWORK_ERROR_CODE_TEMPORARY_RESOLVER_FAILURE:
+    return "EAI_AGAIN";
+  case WASI_SOCKETS_NETWORK_ERROR_CODE_PERMANENT_RESOLVER_FAILURE:
+    return "EAI_FAIL";
   case WASI_SOCKETS_NETWORK_ERROR_CODE_WOULD_BLOCK:
     return "EWOULDBLOCK";
   default:
@@ -189,6 +195,7 @@ JSObject *bytes_to_uint8_array(JSContext *cx, bindings_list_u8_t &bytes) {
 bool connection_read(JSContext *cx, unsigned argc, JS::Value *vp);
 bool connection_write(JSContext *cx, unsigned argc, JS::Value *vp);
 bool connection_close(JSContext *cx, unsigned argc, JS::Value *vp);
+bool connection_shutdown(JSContext *cx, unsigned argc, JS::Value *vp);
 bool listener_accept(JSContext *cx, unsigned argc, JS::Value *vp);
 bool listener_next(JSContext *cx, unsigned argc, JS::Value *vp);
 bool listener_close(JSContext *cx, unsigned argc, JS::Value *vp);
@@ -202,6 +209,7 @@ JSObject *new_connection_object(JSContext *cx, NativeConnection *connection) {
   JS::SetReservedSlot(object, 0, JS::PrivateValue(connection));
   if (!JS_DefineFunction(cx, object, "read", connection_read, 0, 0) ||
       !JS_DefineFunction(cx, object, "write", connection_write, 1, 0) ||
+      !JS_DefineFunction(cx, object, "shutdown", connection_shutdown, 1, 0) ||
       !JS_DefineFunction(cx, object, "close", connection_close, 0, 0)) {
     JS::SetReservedSlot(object, 0, JS::UndefinedValue());
     return nullptr;
@@ -443,6 +451,50 @@ bool connection_close(JSContext *cx, unsigned argc, JS::Value *vp) {
   }
   args.rval().setObject(*promise);
   return true;
+}
+
+bool connection_shutdown(JSContext *cx, unsigned argc, JS::Value *vp) {
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  if (!args.requireAtLeast(cx, "shutdown", 1)) {
+    return false;
+  }
+  NativeConnection *connection = get_connection(cx, args, "shutdown");
+  if (!connection) {
+    return false;
+  }
+  if (!args[0].isString()) {
+    JS_ReportErrorUTF8(cx, "shutdown: direction must be a string");
+    return false;
+  }
+  auto direction = core::encode(cx, args[0]);
+  if (!direction.ptr) {
+    return false;
+  }
+  std::string direction_string(direction.ptr.get(), direction.len);
+  wasi_sockets_tcp_shutdown_type_t shutdown_type;
+  if (direction_string == "read") {
+    shutdown_type = WASI_SOCKETS_TCP_SHUTDOWN_TYPE_RECEIVE;
+  } else if (direction_string == "write") {
+    shutdown_type = WASI_SOCKETS_TCP_SHUTDOWN_TYPE_SEND;
+  } else if (direction_string == "both") {
+    shutdown_type = WASI_SOCKETS_TCP_SHUTDOWN_TYPE_BOTH;
+  } else {
+    JS_ReportErrorUTF8(cx, "shutdown: direction must be read, write, or both");
+    return false;
+  }
+
+  JS::RootedObject promise(cx, JS::NewPromiseObject(cx, nullptr));
+  if (!promise) {
+    return false;
+  }
+  args.rval().setObject(*promise);
+  wasi_sockets_tcp_error_code_t error{};
+  if (!wasi_sockets_tcp_method_tcp_socket_shutdown(
+          wasi_sockets_tcp_borrow_tcp_socket(connection->socket), shutdown_type,
+          &error)) {
+    return reject_socket_error(cx, promise, "shutdown", error);
+  }
+  return JS::ResolvePromise(cx, promise, JS::UndefinedHandleValue);
 }
 
 NativeListener *get_listener(JSContext *cx, JS::CallArgs &args,
@@ -757,6 +809,141 @@ bool connect(JSContext *cx, unsigned argc, JS::Value *vp) {
   return true;
 }
 
+std::string
+format_address(const wasi_sockets_ip_name_lookup_ip_address_t &address) {
+  char buffer[64];
+  if (address.tag == WASI_SOCKETS_NETWORK_IP_ADDRESS_IPV4) {
+    const auto &ipv4 = address.val.ipv4;
+    std::snprintf(buffer, sizeof(buffer), "%u.%u.%u.%u", ipv4.f0, ipv4.f1,
+                  ipv4.f2, ipv4.f3);
+  } else {
+    const auto &ipv6 = address.val.ipv6;
+    std::snprintf(buffer, sizeof(buffer), "%x:%x:%x:%x:%x:%x:%x:%x", ipv6.f0,
+                  ipv6.f1, ipv6.f2, ipv6.f3, ipv6.f4, ipv6.f5, ipv6.f6,
+                  ipv6.f7);
+  }
+  return buffer;
+}
+
+class ResolveTask final : public api::AsyncTask {
+  JS::Heap<JSObject *> promise_;
+  wasi_sockets_instance_network_own_network_t network_;
+  wasi_sockets_ip_name_lookup_own_resolve_address_stream_t stream_;
+  std::vector<std::string> addresses_;
+  bool interested_ = true;
+
+  void cleanup() {
+    drop_pollable(handle_);
+    wasi_sockets_ip_name_lookup_resolve_address_stream_drop_own(stream_);
+    wasi_sockets_network_network_drop_own(network_);
+    stream_.__handle = INVALID_HANDLE;
+    network_.__handle = INVALID_HANDLE;
+    if (interested_) {
+      api::Engine::decr_event_loop_interest();
+      interested_ = false;
+    }
+  }
+
+public:
+  ResolveTask(JS::HandleObject promise,
+              wasi_sockets_instance_network_own_network_t network,
+              wasi_sockets_ip_name_lookup_own_resolve_address_stream_t stream)
+      : promise_(promise), network_(network), stream_(stream) {
+    handle_ =
+        wasi_sockets_ip_name_lookup_method_resolve_address_stream_subscribe(
+            wasi_sockets_ip_name_lookup_borrow_resolve_address_stream(stream_))
+            .__handle;
+    api::Engine::incr_event_loop_interest();
+  }
+
+  bool run(api::Engine *engine) override {
+    JSContext *cx = engine->cx();
+    JS::RootedObject promise(cx, promise_);
+    wasi_sockets_ip_name_lookup_option_ip_address_t address{};
+    wasi_sockets_ip_name_lookup_error_code_t error{};
+    if (!wasi_sockets_ip_name_lookup_method_resolve_address_stream_resolve_next_address(
+            wasi_sockets_ip_name_lookup_borrow_resolve_address_stream(stream_),
+            &address, &error)) {
+      if (error == WASI_SOCKETS_NETWORK_ERROR_CODE_WOULD_BLOCK) {
+        api::Engine::queue_async_task(RefPtr<ResolveTask>(this));
+        return true;
+      }
+      cleanup();
+      return reject_socket_error(cx, promise, "resolve", error);
+    }
+
+    if (address.is_some) {
+      addresses_.push_back(format_address(address.val));
+      wasi_sockets_ip_name_lookup_option_ip_address_free(&address);
+      api::Engine::queue_async_task(RefPtr<ResolveTask>(this));
+      return true;
+    }
+
+    cleanup();
+    JS::RootedObject result(cx, JS::NewArrayObject(cx, 0));
+    if (!result) {
+      return RejectPromiseWithPendingError(cx, promise);
+    }
+    for (size_t index = 0; index < addresses_.size(); index++) {
+      JS::RootedString value(
+          cx,
+          JS_NewStringCopyUTF8N(cx, JS::UTF8Chars(addresses_[index].data(),
+                                                  addresses_[index].size())));
+      if (!value || !JS_SetElement(cx, result, index, value)) {
+        return RejectPromiseWithPendingError(cx, promise);
+      }
+    }
+    JS::RootedValue value(cx, JS::ObjectValue(*result));
+    return JS::ResolvePromise(cx, promise, value);
+  }
+
+  bool cancel(api::Engine *) override {
+    cleanup();
+    return true;
+  }
+
+  void trace(JSTracer *tracer) override {
+    JS::TraceEdge(tracer, &promise_, "Sturnkey resolve promise");
+  }
+};
+
+bool resolve_hostname(JSContext *cx, unsigned argc, JS::Value *vp) {
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  if (!args.requireAtLeast(cx, "resolve", 1)) {
+    return false;
+  }
+  if (!args[0].isString()) {
+    JS_ReportErrorUTF8(cx, "resolve: hostname must be a string");
+    return false;
+  }
+  auto hostname = core::encode(cx, args[0]);
+  if (!hostname.ptr || hostname.len == 0) {
+    if (hostname.ptr) {
+      JS_ReportErrorUTF8(cx, "resolve: hostname must not be empty");
+    }
+    return false;
+  }
+
+  JS::RootedObject promise(cx, JS::NewPromiseObject(cx, nullptr));
+  if (!promise) {
+    return false;
+  }
+  args.rval().setObject(*promise);
+  auto network = wasi_sockets_instance_network_instance_network();
+  bindings_string_t name{reinterpret_cast<uint8_t *>(hostname.ptr.get()),
+                         hostname.len};
+  wasi_sockets_ip_name_lookup_own_resolve_address_stream_t stream;
+  wasi_sockets_ip_name_lookup_error_code_t error{};
+  if (!wasi_sockets_ip_name_lookup_resolve_addresses(
+          wasi_sockets_network_borrow_network(network), &name, &stream,
+          &error)) {
+    wasi_sockets_network_network_drop_own(network);
+    return reject_socket_error(cx, promise, "resolve", error);
+  }
+  api::Engine::queue_async_task(js_new<ResolveTask>(promise, network, stream));
+  return true;
+}
+
 class ListenTask final : public api::AsyncTask {
   JS::Heap<JSObject *> promise_;
   wasi_sockets_tcp_own_tcp_socket_t socket_;
@@ -895,7 +1082,9 @@ bool install(api::Engine *engine) {
   JS::RootedObject module(cx, JS_NewPlainObject(cx));
   if (!module ||
       !JS_DefineFunction(cx, module, "connect", connect, 1, JSPROP_ENUMERATE) ||
-      !JS_DefineFunction(cx, module, "listen", listen, 1, JSPROP_ENUMERATE)) {
+      !JS_DefineFunction(cx, module, "listen", listen, 1, JSPROP_ENUMERATE) ||
+      !JS_DefineFunction(cx, module, "resolve", resolve_hostname, 1,
+                         JSPROP_ENUMERATE)) {
     return false;
   }
   JS::RootedValue module_value(cx, JS::ObjectValue(*module));

@@ -21,14 +21,21 @@ idempotent, but currently rejects a close attempted while I/O is pending.
 Socket failures reject with errors carrying stable codes such as
 `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, or `EACCES`.
 
+`resolve(hostname)` performs asynchronous `wasi:sockets/ip-name-lookup` and
+returns numeric IPv4 and IPv6 address strings. `connection.shutdown(direction)`
+half-closes `read`, `write`, or `both`, allowing proxy applications to forward
+EOF without discarding traffic still flowing in the opposite direction.
+
 Wasmtime must receive explicit TCP and network grants:
 
 ```console
-wasmtime -S http -S tcp -S inherit-network sturnkey.wasm client.js
+wasmtime -S http -S tcp -S inherit-network -S allow-ip-name-lookup \
+  sturnkey.wasm client.js
 ```
 
 `inherit-network` grants the component access to the host network namespace;
-it is materially broader than a directory preopen.
+it is materially broader than a directory preopen. Name resolution additionally
+requires `allow-ip-name-lookup`.
 
 ## TCP listeners
 

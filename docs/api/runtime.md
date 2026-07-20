@@ -11,6 +11,16 @@ const version: string;
 
 The Sturnkey runtime version.
 
+## `arguments()`
+
+```ts
+function arguments(): string[];
+```
+
+Return a fresh array containing the WASI command-line arguments. The runtime
+executable and JavaScript script path are included; applications should treat
+any later values as their own arguments.
+
 ## `sleep(milliseconds)`
 
 ```ts

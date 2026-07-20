@@ -17,13 +17,14 @@ not provide Node.js or npm compatibility.
 
 ## Status
 
-Sturnkey is in early development. The first milestone is a reproducible
-runtime build that loads JavaScript dynamically. Promise-based WASI filesystem,
-TCP, CLI, and HTTP server APIs will follow in small, tested increments.
+Sturnkey is in early development. It currently loads JavaScript dynamically,
+supports the CLI asynchronous lifecycle, and exposes a capability-based
+filesystem API. TCP and HTTP server APIs will follow in tested increments.
 
-The current runtime already loads JavaScript at execution time and exposes a
-small `sturnkey:runtime` builtin with a Promise-based monotonic `sleep()` API.
-It does not yet expose Sturnkey filesystem or socket APIs.
+The `sturnkey:runtime` builtin provides command-line arguments and a
+Promise-based monotonic `sleep()` API. The `sturnkey:fs` builtin provides byte
+and UTF-8 file I/O plus basic directory operations inside Wasmtime preopens.
+Sturnkey does not yet expose socket APIs.
 
 ## Build
 
@@ -94,6 +95,7 @@ See [UPSTREAM.md](UPSTREAM.md) for dependency and update policy.
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the staged implementation plan and
 acceptance criteria.
 See [docs/api/runtime.md](docs/api/runtime.md) for the current JavaScript API.
+See [docs/api/filesystem.md](docs/api/filesystem.md) for the filesystem API.
 
 ## License
 

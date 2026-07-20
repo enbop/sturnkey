@@ -30,6 +30,7 @@ include("${STARLINGMONKEY_SOURCE}/cmake/add_builtin.cmake")
 add_builtin(sturnkey::runtime SRC runtime/src/runtime.cpp)
 target_compile_definitions(
   ${LIB_NAME} PRIVATE STURNKEY_VERSION="${PROJECT_VERSION}")
+add_builtin(sturnkey::filesystem SRC runtime/src/filesystem.cpp)
 
 set(STURNKEY_WASM "${CMAKE_BINARY_DIR}/sturnkey.wasm")
 add_custom_command(
@@ -48,6 +49,7 @@ if(CLANG_FORMAT_EXECUTABLE)
     format-check
     COMMAND "${CLANG_FORMAT_EXECUTABLE}" --dry-run --Werror
             "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/runtime.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/filesystem.cpp"
     COMMENT "Checking Sturnkey C++ formatting"
     VERBATIM)
 endif()
@@ -97,6 +99,19 @@ if(STURNKEY_BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests"
         "${STURNKEY_WASM}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/async-rejection.js")
+
+    set(FILESYSTEM_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/filesystem-test")
+    file(MAKE_DIRECTORY "${FILESYSTEM_TEST_DIR}")
+    add_test(
+      NAME filesystem
+      COMMAND
+        "${WASMTIME_EXECUTABLE}" -S http --dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests" --dir
+        "${FILESYSTEM_TEST_DIR}::/sandbox" "${STURNKEY_WASM}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/filesystem.js")
+    set_tests_properties(
+      filesystem PROPERTIES PASS_REGULAR_EXPRESSION
+                            "filesystem capability test completed")
   else()
     message(WARNING "Wasmtime not found; runtime tests are disabled")
   endif()

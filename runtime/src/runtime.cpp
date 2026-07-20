@@ -93,6 +93,28 @@ bool sleep(JSContext *cx, unsigned argc, JS::Value *vp) {
   return true;
 }
 
+bool arguments(JSContext *cx, unsigned argc, JS::Value *vp) {
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  auto host_arguments = host_api::environment_get_arguments();
+  JS::RootedObject result(cx, JS::NewArrayObject(cx, 0));
+  if (!result) {
+    return false;
+  }
+
+  for (size_t index = 0; index < host_arguments.size(); index++) {
+    const auto &argument = host_arguments[index];
+    JS::RootedString value(
+        cx, JS_NewStringCopyUTF8N(
+                cx, JS::UTF8Chars(argument.data(), argument.size())));
+    if (!value || !JS_SetElement(cx, result, index, value)) {
+      return false;
+    }
+  }
+
+  args.rval().setObject(*result);
+  return true;
+}
+
 } // namespace
 
 namespace sturnkey::runtime {
@@ -125,6 +147,20 @@ bool install(api::Engine *engine) {
   JS::RootedValue sleep_value(
       cx, JS::ObjectValue(*JS_GetFunctionObject(sleep_function)));
   if (!JS_DefineProperty(cx, module, "sleep", sleep_value,
+                         JSPROP_ENUMERATE | JSPROP_READONLY |
+                             JSPROP_PERMANENT)) {
+    return false;
+  }
+
+  JS::RootedFunction arguments_function(
+      cx, JS_NewFunction(cx, arguments, 0, 0, "arguments"));
+  if (!arguments_function) {
+    return false;
+  }
+
+  JS::RootedValue arguments_value(
+      cx, JS::ObjectValue(*JS_GetFunctionObject(arguments_function)));
+  if (!JS_DefineProperty(cx, module, "arguments", arguments_value,
                          JSPROP_ENUMERATE | JSPROP_READONLY |
                              JSPROP_PERMANENT)) {
     return false;

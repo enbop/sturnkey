@@ -1,7 +1,9 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <string>
 
+#include "bindings.h"
 #include "builtin.h"
 #include "extension-api.h"
 #include "host_api.h"
@@ -115,6 +117,46 @@ bool arguments(JSContext *cx, unsigned argc, JS::Value *vp) {
   return true;
 }
 
+bool environment(JSContext *cx, unsigned argc, JS::Value *vp) {
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  if (!args.requireAtLeast(cx, "environment", 1)) {
+    return false;
+  }
+  if (!args[0].isString()) {
+    JS_ReportErrorUTF8(cx, "environment: name must be a string");
+    return false;
+  }
+
+  JS::RootedString name_value(cx, args[0].toString());
+  JS::UniqueChars name = JS_EncodeStringToUTF8(cx, name_value);
+  if (!name) {
+    return false;
+  }
+  bindings_list_tuple2_string_string_t entries{};
+  wasi_cli_environment_get_environment(&entries);
+  for (size_t index = 0; index < entries.len; index++) {
+    auto &entry = entries.ptr[index];
+    std::string entry_name(reinterpret_cast<char *>(entry.f0.ptr),
+                           entry.f0.len);
+    if (entry_name != name.get()) {
+      continue;
+    }
+    JS::RootedString value(
+        cx, JS_NewStringCopyUTF8N(
+                cx, JS::UTF8Chars(reinterpret_cast<char *>(entry.f1.ptr),
+                                  entry.f1.len)));
+    bindings_list_tuple2_string_string_free(&entries);
+    if (!value) {
+      return false;
+    }
+    args.rval().setString(value);
+    return true;
+  }
+  bindings_list_tuple2_string_string_free(&entries);
+  args.rval().setUndefined();
+  return true;
+}
+
 } // namespace
 
 namespace sturnkey::runtime {
@@ -161,6 +203,19 @@ bool install(api::Engine *engine) {
   JS::RootedValue arguments_value(
       cx, JS::ObjectValue(*JS_GetFunctionObject(arguments_function)));
   if (!JS_DefineProperty(cx, module, "arguments", arguments_value,
+                         JSPROP_ENUMERATE | JSPROP_READONLY |
+                             JSPROP_PERMANENT)) {
+    return false;
+  }
+
+  JS::RootedFunction environment_function(
+      cx, JS_NewFunction(cx, environment, 1, 0, "environment"));
+  if (!environment_function) {
+    return false;
+  }
+  JS::RootedValue environment_value(
+      cx, JS::ObjectValue(*JS_GetFunctionObject(environment_function)));
+  if (!JS_DefineProperty(cx, module, "environment", environment_value,
                          JSPROP_ENUMERATE | JSPROP_READONLY |
                              JSPROP_PERMANENT)) {
     return false;

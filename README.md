@@ -95,7 +95,8 @@ See [UPSTREAM.md](UPSTREAM.md) for dependency and update policy.
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the staged implementation plan and
 acceptance criteria.
 See [docs/api/runtime.md](docs/api/runtime.md) for the current JavaScript API.
-See [docs/api/filesystem.md](docs/api/filesystem.md) for the filesystem API.
+See [docs/api/filesystem.md](docs/api/filesystem.md) for the filesystem API and
+[docs/api/network.md](docs/api/network.md) for TCP capabilities.
 
 ## License
 

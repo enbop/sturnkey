@@ -27,10 +27,19 @@ set(BUILD_TESTING OFF CACHE BOOL "Build upstream tests" FORCE)
 add_subdirectory("${STARLINGMONKEY_SOURCE}" "${STARLINGMONKEY_BINARY_DIR}")
 include("${STARLINGMONKEY_SOURCE}/cmake/add_builtin.cmake")
 
-add_builtin(sturnkey::runtime SRC runtime/src/runtime.cpp)
+add_builtin(
+  sturnkey::runtime
+  SRC runtime/src/runtime.cpp
+  INCLUDE_DIRS "${STARLINGMONKEY_SOURCE}/host-apis/wasi-0.2.10/bindings"
+  DEPENDENCIES host_api)
 target_compile_definitions(
   ${LIB_NAME} PRIVATE STURNKEY_VERSION="${PROJECT_VERSION}")
 add_builtin(sturnkey::filesystem SRC runtime/src/filesystem.cpp)
+add_builtin(
+  sturnkey::network
+  SRC runtime/src/network.cpp
+  INCLUDE_DIRS "${STARLINGMONKEY_SOURCE}/host-apis/wasi-0.2.10/bindings"
+  DEPENDENCIES host_api)
 
 set(STURNKEY_WASM "${CMAKE_BINARY_DIR}/sturnkey.wasm")
 add_custom_command(
@@ -50,6 +59,7 @@ if(CLANG_FORMAT_EXECUTABLE)
     COMMAND "${CLANG_FORMAT_EXECUTABLE}" --dry-run --Werror
             "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/runtime.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/filesystem.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/network.cpp"
     COMMENT "Checking Sturnkey C++ formatting"
     VERBATIM)
 endif()
@@ -112,6 +122,19 @@ if(STURNKEY_BUILD_TESTING)
     set_tests_properties(
       filesystem PROPERTIES PASS_REGULAR_EXPRESSION
                             "filesystem capability test completed")
+
+    find_program(NODE_EXECUTABLE NAMES node)
+    if(NODE_EXECUTABLE)
+      add_test(
+        NAME tcp-client
+        COMMAND
+          "${NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/tcp-client.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/tcp-client.js")
+      set_tests_properties(
+        tcp-client PROPERTIES PASS_REGULAR_EXPRESSION
+                              "tcp client test completed" TIMEOUT 20)
+    endif()
   else()
     message(WARNING "Wasmtime not found; runtime tests are disabled")
   endif()

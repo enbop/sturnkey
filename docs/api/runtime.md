@@ -17,9 +17,19 @@ The Sturnkey runtime version.
 function arguments(): string[];
 ```
 
-Return a fresh array containing the WASI command-line arguments. The runtime
-executable and JavaScript script path are included; applications should treat
-any later values as their own arguments.
+Return a fresh array containing the command line consumed by StarlingMonkey's
+runtime configuration parser. Additional positional application arguments are
+not currently supported; use explicitly granted environment variables instead.
+
+## `environment(name)`
+
+```ts
+function environment(name: string): string | undefined;
+```
+
+Return one environment variable, or `undefined` when it was not granted. Pass
+values with Wasmtime's `--env NAME=value` option. Sturnkey intentionally does
+not expose the host environment implicitly.
 
 ## `sleep(milliseconds)`
 

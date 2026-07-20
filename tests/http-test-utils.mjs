@@ -13,8 +13,16 @@ export function reservePort() {
   });
 }
 
-export function startRuntime({ wasmtime, wasm, script, directories = [], environment = {} }) {
+export function startRuntime({
+  wasmtime,
+  wasm,
+  script,
+  directories = [],
+  environment = {},
+  wasiOptions = [],
+}) {
   const args = ["-S", "http", "-S", "tcp", "-S", "inherit-network"];
+  for (const option of wasiOptions) args.push("-S", option);
   for (const directory of directories) args.push("--dir", directory);
   for (const [name, value] of Object.entries(environment)) {
     args.push("--env", `${name}=${value}`);

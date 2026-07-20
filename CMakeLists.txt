@@ -167,6 +167,16 @@ if(STURNKEY_BUILD_TESTING)
       set_tests_properties(
         http-web-app PROPERTIES PASS_REGULAR_EXPRESSION
                                 "HTTP web app test completed" TIMEOUT 30)
+
+      add_test(
+        NAME socks5
+        COMMAND
+          "${NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/socks5.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+      set_tests_properties(
+        socks5 PROPERTIES PASS_REGULAR_EXPRESSION
+                          "SOCKS5 proxy test completed" TIMEOUT 30)
     endif()
   else()
     message(WARNING "Wasmtime not found; runtime tests are disabled")

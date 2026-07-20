@@ -26,6 +26,9 @@ The repository also contains experimental JavaScript-only HTTP/1.1 helpers, a
 static file server, and a server-rendered Web App. These are application proofs,
 not yet a stable HTTP framework.
 
+An experimental SOCKS5 proxy demonstrates domain lookup, outbound TCP,
+bidirectional relay, and half-close entirely from dynamic JavaScript.
+
 The `sturnkey:runtime` builtin provides command-line arguments and a
 Promise-based monotonic `sleep()` API. The `sturnkey:fs` builtin provides byte
 and UTF-8 file I/O plus basic directory operations inside Wasmtime preopens.
@@ -104,6 +107,7 @@ See [docs/api/runtime.md](docs/api/runtime.md) for the current JavaScript API.
 See [docs/api/filesystem.md](docs/api/filesystem.md) for the filesystem API and
 [docs/api/network.md](docs/api/network.md) for TCP capabilities.
 See [docs/http.md](docs/http.md) for the experimental HTTP application layer.
+See [docs/socks5.md](docs/socks5.md) for the SOCKS5 application proof.
 
 ## License
 

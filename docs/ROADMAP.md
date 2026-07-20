@@ -141,8 +141,8 @@ Harden the API before building larger applications:
 
 ### M6: Application proofs
 
-Status: the TCP echo server, static HTTP file server, and simple SSR Web App are
-implemented. The SOCKS5 proof remains pending DNS and half-close support.
+Status: implemented. The TCP echo server, static HTTP file server, simple SSR
+Web App, and SOCKS5 CONNECT proxy all run as dynamic JavaScript under Wasmtime.
 
 Build three dynamic JavaScript applications:
 

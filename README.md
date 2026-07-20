@@ -90,6 +90,8 @@ vendor/StarlingMonkey/   Pinned upstream submodule
 ```
 
 See [UPSTREAM.md](UPSTREAM.md) for dependency and update policy.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the staged implementation plan and
+acceptance criteria.
 
 ## License
 

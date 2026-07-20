@@ -141,6 +141,9 @@ Harden the API before building larger applications:
 
 ### M6: Application proofs
 
+Status: the TCP echo server, static HTTP file server, and simple SSR Web App are
+implemented. The SOCKS5 proof remains pending DNS and half-close support.
+
 Build three dynamic JavaScript applications:
 
 1. A TCP echo server covering the complete listener lifecycle.

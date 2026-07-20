@@ -145,6 +145,28 @@ if(STURNKEY_BUILD_TESTING)
       set_tests_properties(
         tcp-listener PROPERTIES PASS_REGULAR_EXPRESSION
                                 "tcp listener test completed" TIMEOUT 30)
+
+      add_test(
+        NAME http-file-server
+        COMMAND
+          "${NODE_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/http-file-server.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+      set_tests_properties(
+        http-file-server PROPERTIES PASS_REGULAR_EXPRESSION
+                                    "HTTP file server test completed" TIMEOUT 30)
+
+      add_test(
+        NAME http-web-app
+        COMMAND
+          "${NODE_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/http-web-app.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+      set_tests_properties(
+        http-web-app PROPERTIES PASS_REGULAR_EXPRESSION
+                                "HTTP web app test completed" TIMEOUT 30)
     endif()
   else()
     message(WARNING "Wasmtime not found; runtime tests are disabled")

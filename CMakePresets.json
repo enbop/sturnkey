@@ -47,7 +47,7 @@
       "configurePreset": "dev",
       "filter": {
         "include": {
-          "name": "^(async-invalid|async-rejection|async-sleep|dynamic-js|filesystem|tcp-client|tcp-listener)$"
+          "name": "^(async-invalid|async-rejection|async-sleep|dynamic-js|filesystem|http-file-server|http-web-app|tcp-client|tcp-listener)$"
         }
       },
       "output": {
@@ -59,7 +59,7 @@
       "configurePreset": "release",
       "filter": {
         "include": {
-          "name": "^(async-invalid|async-rejection|async-sleep|dynamic-js|filesystem|tcp-client|tcp-listener)$"
+          "name": "^(async-invalid|async-rejection|async-sleep|dynamic-js|filesystem|http-file-server|http-web-app|tcp-client|tcp-listener)$"
         }
       },
       "output": {

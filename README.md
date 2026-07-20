@@ -22,6 +22,10 @@ supports the CLI asynchronous lifecycle, and exposes capability-based
 filesystem and asynchronous TCP client/listener APIs. HTTP server APIs and
 network hardening will follow in tested increments.
 
+The repository also contains experimental JavaScript-only HTTP/1.1 helpers, a
+static file server, and a server-rendered Web App. These are application proofs,
+not yet a stable HTTP framework.
+
 The `sturnkey:runtime` builtin provides command-line arguments and a
 Promise-based monotonic `sleep()` API. The `sturnkey:fs` builtin provides byte
 and UTF-8 file I/O plus basic directory operations inside Wasmtime preopens.
@@ -99,6 +103,7 @@ acceptance criteria.
 See [docs/api/runtime.md](docs/api/runtime.md) for the current JavaScript API.
 See [docs/api/filesystem.md](docs/api/filesystem.md) for the filesystem API and
 [docs/api/network.md](docs/api/network.md) for TCP capabilities.
+See [docs/http.md](docs/http.md) for the experimental HTTP application layer.
 
 ## License
 

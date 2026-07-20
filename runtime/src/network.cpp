@@ -99,6 +99,20 @@ struct NativeConnection {
   }
 };
 
+struct NativeListener {
+  wasi_sockets_tcp_own_tcp_socket_t socket{INVALID_HANDLE};
+  bool closed = false;
+  bool accepting = false;
+
+  void close() {
+    if (!closed) {
+      closed = true;
+      wasi_sockets_tcp_tcp_socket_drop_own(socket);
+      socket.__handle = INVALID_HANDLE;
+    }
+  }
+};
+
 void finalize_connection(JS::GCContext *, JSObject *object) {
   JS::Value value = JS::GetReservedSlot(object, 0);
   if (value.isUndefined()) {
@@ -116,6 +130,25 @@ static constexpr JSClass connection_class = {
     "TcpConnection",
     JSCLASS_HAS_RESERVED_SLOTS(1) | JSCLASS_BACKGROUND_FINALIZE,
     &connection_class_ops,
+};
+
+void finalize_listener(JS::GCContext *, JSObject *object) {
+  JS::Value value = JS::GetReservedSlot(object, 0);
+  if (value.isUndefined()) {
+    return;
+  }
+  auto *listener = static_cast<NativeListener *>(value.toPrivate());
+  listener->close();
+  delete listener;
+}
+
+static constexpr JSClassOps listener_class_ops = {
+    .finalize = finalize_listener,
+};
+static constexpr JSClass listener_class = {
+    "TcpListener",
+    JSCLASS_HAS_RESERVED_SLOTS(1) | JSCLASS_BACKGROUND_FINALIZE,
+    &listener_class_ops,
 };
 
 NativeConnection *get_connection(JSContext *cx, JS::CallArgs &args,
@@ -144,6 +177,7 @@ JSObject *bytes_to_uint8_array(JSContext *cx, bindings_list_u8_t &bytes) {
               cx, bytes.len, bytes.ptr,
               JS::NewArrayBufferOutOfMemory::CallerMustFreeMemory));
   if (!buffer) {
+    bindings_list_u8_free(&bytes);
     return nullptr;
   }
   size_t length = bytes.len;
@@ -155,6 +189,10 @@ JSObject *bytes_to_uint8_array(JSContext *cx, bindings_list_u8_t &bytes) {
 bool connection_read(JSContext *cx, unsigned argc, JS::Value *vp);
 bool connection_write(JSContext *cx, unsigned argc, JS::Value *vp);
 bool connection_close(JSContext *cx, unsigned argc, JS::Value *vp);
+bool listener_accept(JSContext *cx, unsigned argc, JS::Value *vp);
+bool listener_next(JSContext *cx, unsigned argc, JS::Value *vp);
+bool listener_close(JSContext *cx, unsigned argc, JS::Value *vp);
+bool listener_async_iterator(JSContext *cx, unsigned argc, JS::Value *vp);
 
 JSObject *new_connection_object(JSContext *cx, NativeConnection *connection) {
   JS::RootedObject object(cx, JS_NewObject(cx, &connection_class));
@@ -165,6 +203,46 @@ JSObject *new_connection_object(JSContext *cx, NativeConnection *connection) {
   if (!JS_DefineFunction(cx, object, "read", connection_read, 0, 0) ||
       !JS_DefineFunction(cx, object, "write", connection_write, 1, 0) ||
       !JS_DefineFunction(cx, object, "close", connection_close, 0, 0)) {
+    JS::SetReservedSlot(object, 0, JS::UndefinedValue());
+    return nullptr;
+  }
+  return object;
+}
+
+JSObject *new_listener_object(JSContext *cx, NativeListener *listener,
+                              const std::string &hostname, uint16_t port) {
+  JS::RootedObject object(cx, JS_NewObject(cx, &listener_class));
+  if (!object) {
+    return nullptr;
+  }
+  JS::SetReservedSlot(object, 0, JS::PrivateValue(listener));
+  JS::RootedString hostname_value(
+      cx, JS_NewStringCopyN(cx, hostname.data(), hostname.size()));
+  if (!hostname_value ||
+      !JS_DefineProperty(cx, object, "hostname", hostname_value,
+                         JSPROP_ENUMERATE | JSPROP_READONLY) ||
+      !JS_DefineProperty(cx, object, "port", port,
+                         JSPROP_ENUMERATE | JSPROP_READONLY) ||
+      !JS_DefineFunction(cx, object, "accept", listener_accept, 0, 0) ||
+      !JS_DefineFunction(cx, object, "next", listener_next, 0, 0) ||
+      !JS_DefineFunction(cx, object, "close", listener_close, 0, 0)) {
+    JS::SetReservedSlot(object, 0, JS::UndefinedValue());
+    return nullptr;
+  }
+  JS::RootedFunction iterator_function(
+      cx, JS_NewFunction(cx, listener_async_iterator, 0, 0,
+                         "[Symbol.asyncIterator]"));
+  if (!iterator_function) {
+    JS::SetReservedSlot(object, 0, JS::UndefinedValue());
+    return nullptr;
+  }
+  JS::RootedValue iterator_value(
+      cx, JS::ObjectValue(*JS_GetFunctionObject(iterator_function)));
+  JS::RootedId iterator_id(
+      cx, JS::GetWellKnownSymbolKey(cx, JS::SymbolCode::asyncIterator));
+  if (!JS_DefinePropertyById(cx, object, iterator_id, iterator_value,
+                             JSPROP_READONLY)) {
+    JS::SetReservedSlot(object, 0, JS::UndefinedValue());
     return nullptr;
   }
   return object;
@@ -227,6 +305,7 @@ public:
 
     if (!success) {
       if (error.tag == WASI_IO_STREAMS_STREAM_ERROR_CLOSED) {
+        wasi_io_streams_stream_error_free(&error);
         return JS::ResolvePromise(cx, promise, JS::NullHandleValue);
       }
       wasi_io_streams_stream_error_free(&error);
@@ -366,6 +445,162 @@ bool connection_close(JSContext *cx, unsigned argc, JS::Value *vp) {
   return true;
 }
 
+NativeListener *get_listener(JSContext *cx, JS::CallArgs &args,
+                             const char *method) {
+  if (!args.thisv().isObject() ||
+      JS::GetClass(&args.thisv().toObject()) != &listener_class) {
+    JS_ReportErrorUTF8(cx, "%s called with an incompatible receiver", method);
+    return nullptr;
+  }
+  auto value = JS::GetReservedSlot(&args.thisv().toObject(), 0);
+  auto *listener = static_cast<NativeListener *>(value.toPrivate());
+  if (listener->closed) {
+    JS_ReportErrorUTF8(cx, "%s: listener is closed", method);
+    return nullptr;
+  }
+  return listener;
+}
+
+class AcceptTask final : public api::AsyncTask {
+  JS::Heap<JSObject *> promise_;
+  JS::Heap<JSObject *> listener_object_;
+  NativeListener *listener_;
+  bool iterator_;
+  bool interested_ = true;
+
+  void complete() {
+    drop_pollable(handle_);
+    listener_->accepting = false;
+    if (interested_) {
+      api::Engine::decr_event_loop_interest();
+      interested_ = false;
+    }
+  }
+
+public:
+  AcceptTask(JS::HandleObject promise, JS::HandleObject listener_object,
+             NativeListener *listener, bool iterator)
+      : promise_(promise), listener_object_(listener_object),
+        listener_(listener), iterator_(iterator) {
+    handle_ = wasi_sockets_tcp_method_tcp_socket_subscribe(
+                  wasi_sockets_tcp_borrow_tcp_socket(listener_->socket))
+                  .__handle;
+    api::Engine::incr_event_loop_interest();
+  }
+
+  bool run(api::Engine *engine) override {
+    JSContext *cx = engine->cx();
+    JS::RootedObject promise(cx, promise_);
+    wasi_sockets_tcp_tuple3_own_tcp_socket_own_input_stream_own_output_stream_t
+        accepted{};
+    wasi_sockets_tcp_error_code_t error{};
+    if (!wasi_sockets_tcp_method_tcp_socket_accept(
+            wasi_sockets_tcp_borrow_tcp_socket(listener_->socket), &accepted,
+            &error)) {
+      if (error == WASI_SOCKETS_NETWORK_ERROR_CODE_WOULD_BLOCK) {
+        api::Engine::queue_async_task(RefPtr<AcceptTask>(this));
+        return true;
+      }
+      complete();
+      return reject_socket_error(cx, promise, "accept", error);
+    }
+    complete();
+    auto *connection =
+        new NativeConnection{accepted.f0, accepted.f1, accepted.f2};
+    JS::RootedObject connection_object(cx,
+                                       new_connection_object(cx, connection));
+    if (!connection_object) {
+      connection->close();
+      delete connection;
+      return RejectPromiseWithPendingError(cx, promise);
+    }
+    JS::RootedValue value(cx, JS::ObjectValue(*connection_object));
+    if (iterator_) {
+      JS::RootedObject result(cx, JS_NewPlainObject(cx));
+      if (!result ||
+          !JS_DefineProperty(cx, result, "value", value, JSPROP_ENUMERATE) ||
+          !JS_DefineProperty(cx, result, "done", false, JSPROP_ENUMERATE)) {
+        return RejectPromiseWithPendingError(cx, promise);
+      }
+      value.setObject(*result);
+    }
+    return JS::ResolvePromise(cx, promise, value);
+  }
+
+  bool cancel(api::Engine *) override {
+    complete();
+    return true;
+  }
+
+  void trace(JSTracer *tracer) override {
+    JS::TraceEdge(tracer, &promise_, "Sturnkey accept promise");
+    JS::TraceEdge(tracer, &listener_object_, "Sturnkey listener");
+  }
+};
+
+bool start_accept(JSContext *cx, JS::CallArgs &args, bool iterator) {
+  NativeListener *listener =
+      get_listener(cx, args, iterator ? "next" : "accept");
+  if (!listener) {
+    return false;
+  }
+  if (listener->accepting) {
+    JS_ReportErrorUTF8(cx, "accept: another accept is already pending");
+    return false;
+  }
+  JS::RootedObject promise(cx, JS::NewPromiseObject(cx, nullptr));
+  if (!promise) {
+    return false;
+  }
+  JS::RootedObject self(cx, &args.thisv().toObject());
+  listener->accepting = true;
+  api::Engine::queue_async_task(
+      js_new<AcceptTask>(promise, self, listener, iterator));
+  args.rval().setObject(*promise);
+  return true;
+}
+
+bool listener_accept(JSContext *cx, unsigned argc, JS::Value *vp) {
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  return start_accept(cx, args, false);
+}
+
+bool listener_next(JSContext *cx, unsigned argc, JS::Value *vp) {
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  return start_accept(cx, args, true);
+}
+
+bool listener_async_iterator(JSContext *cx, unsigned argc, JS::Value *vp) {
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  if (!get_listener(cx, args, "[Symbol.asyncIterator]")) {
+    return false;
+  }
+  args.rval().set(args.thisv());
+  return true;
+}
+
+bool listener_close(JSContext *cx, unsigned argc, JS::Value *vp) {
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  if (!args.thisv().isObject() ||
+      JS::GetClass(&args.thisv().toObject()) != &listener_class) {
+    JS_ReportErrorUTF8(cx, "close called with an incompatible receiver");
+    return false;
+  }
+  auto value = JS::GetReservedSlot(&args.thisv().toObject(), 0);
+  auto *listener = static_cast<NativeListener *>(value.toPrivate());
+  if (listener->accepting) {
+    JS_ReportErrorUTF8(cx, "close: an accept is still pending");
+    return false;
+  }
+  listener->close();
+  JS::RootedObject promise(cx, JS::NewPromiseObject(cx, nullptr));
+  if (!promise || !JS::ResolvePromise(cx, promise, JS::UndefinedHandleValue)) {
+    return false;
+  }
+  args.rval().setObject(*promise);
+  return true;
+}
+
 bool parse_ipv4(const std::string &hostname, std::array<uint8_t, 4> &address) {
   unsigned values[4];
   char tail;
@@ -383,9 +618,10 @@ bool parse_ipv4(const std::string &hostname, std::array<uint8_t, 4> &address) {
 }
 
 bool get_endpoint(JSContext *cx, JS::HandleValue value,
-                  std::array<uint8_t, 4> &address, uint16_t &port) {
+                  std::array<uint8_t, 4> &address, uint16_t &port,
+                  const char *operation) {
   if (!value.isObject()) {
-    JS_ReportErrorUTF8(cx, "connect: endpoint must be an object");
+    JS_ReportErrorUTF8(cx, "%s: endpoint must be an object", operation);
     return false;
   }
   JS::RootedObject object(cx, &value.toObject());
@@ -396,7 +632,7 @@ bool get_endpoint(JSContext *cx, JS::HandleValue value,
     return false;
   }
   if (!hostname_value.isString() || !port_value.isNumber()) {
-    JS_ReportErrorUTF8(cx, "connect: hostname and port are required");
+    JS_ReportErrorUTF8(cx, "%s: hostname and port are required", operation);
     return false;
   }
   auto hostname = core::encode(cx, hostname_value);
@@ -405,13 +641,14 @@ bool get_endpoint(JSContext *cx, JS::HandleValue value,
   }
   std::string hostname_string(hostname.ptr.get(), hostname.len);
   if (!parse_ipv4(hostname_string, address)) {
-    JS_ReportErrorUTF8(cx, "connect: M3 requires an IPv4 address");
+    JS_ReportErrorUTF8(cx, "%s: a numeric IPv4 address is required", operation);
     return false;
   }
   double port_number = port_value.toNumber();
   if (port_number < 1 || port_number > 65535 ||
       port_number != uint16_t(port_number)) {
-    JS_ReportErrorUTF8(cx, "connect: port must be an integer from 1 to 65535");
+    JS_ReportErrorUTF8(cx, "%s: port must be an integer from 1 to 65535",
+                       operation);
     return false;
   }
   port = uint16_t(port_number);
@@ -489,7 +726,7 @@ bool connect(JSContext *cx, unsigned argc, JS::Value *vp) {
   }
   std::array<uint8_t, 4> address;
   uint16_t port;
-  if (!get_endpoint(cx, args[0], address, port)) {
+  if (!get_endpoint(cx, args[0], address, port, "connect")) {
     return false;
   }
   JS::RootedObject promise(cx, JS::NewPromiseObject(cx, nullptr));
@@ -520,6 +757,135 @@ bool connect(JSContext *cx, unsigned argc, JS::Value *vp) {
   return true;
 }
 
+class ListenTask final : public api::AsyncTask {
+  JS::Heap<JSObject *> promise_;
+  wasi_sockets_tcp_own_tcp_socket_t socket_;
+  wasi_sockets_instance_network_own_network_t network_;
+  std::string hostname_;
+  uint16_t port_;
+  bool listening_started_ = false;
+  bool interested_ = true;
+
+  void cleanup(bool drop_socket) {
+    drop_pollable(handle_);
+    wasi_sockets_network_network_drop_own(network_);
+    network_.__handle = INVALID_HANDLE;
+    if (drop_socket) {
+      wasi_sockets_tcp_tcp_socket_drop_own(socket_);
+      socket_.__handle = INVALID_HANDLE;
+    }
+    if (interested_) {
+      api::Engine::decr_event_loop_interest();
+      interested_ = false;
+    }
+  }
+
+public:
+  ListenTask(JS::HandleObject promise, wasi_sockets_tcp_own_tcp_socket_t socket,
+             wasi_sockets_instance_network_own_network_t network,
+             std::string hostname, uint16_t port)
+      : promise_(promise), socket_(socket), network_(network),
+        hostname_(std::move(hostname)), port_(port) {
+    handle_ = wasi_sockets_tcp_method_tcp_socket_subscribe(
+                  wasi_sockets_tcp_borrow_tcp_socket(socket_))
+                  .__handle;
+    api::Engine::incr_event_loop_interest();
+  }
+
+  bool run(api::Engine *engine) override {
+    JSContext *cx = engine->cx();
+    JS::RootedObject promise(cx, promise_);
+    auto socket = wasi_sockets_tcp_borrow_tcp_socket(socket_);
+    wasi_sockets_tcp_error_code_t error{};
+    if (!listening_started_) {
+      if (!wasi_sockets_tcp_method_tcp_socket_finish_bind(socket, &error) ||
+          !wasi_sockets_tcp_method_tcp_socket_start_listen(socket, &error)) {
+        cleanup(true);
+        return reject_socket_error(cx, promise, "listen", error);
+      }
+      listening_started_ = true;
+    }
+    if (!wasi_sockets_tcp_method_tcp_socket_finish_listen(socket, &error)) {
+      if (error == WASI_SOCKETS_NETWORK_ERROR_CODE_WOULD_BLOCK) {
+        api::Engine::queue_async_task(RefPtr<ListenTask>(this));
+        return true;
+      }
+      cleanup(true);
+      return reject_socket_error(cx, promise, "listen", error);
+    }
+    auto *listener = new NativeListener{socket_};
+    JS::RootedObject result(
+        cx, new_listener_object(cx, listener, hostname_, port_));
+    if (!result) {
+      listener->close();
+      delete listener;
+      cleanup(false);
+      return RejectPromiseWithPendingError(cx, promise);
+    }
+    cleanup(false);
+    JS::RootedValue value(cx, JS::ObjectValue(*result));
+    return JS::ResolvePromise(cx, promise, value);
+  }
+
+  bool cancel(api::Engine *) override {
+    cleanup(true);
+    return true;
+  }
+
+  void trace(JSTracer *tracer) override {
+    JS::TraceEdge(tracer, &promise_, "Sturnkey listen promise");
+  }
+};
+
+bool listen(JSContext *cx, unsigned argc, JS::Value *vp) {
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  if (!args.requireAtLeast(cx, "listen", 1)) {
+    return false;
+  }
+  std::array<uint8_t, 4> address;
+  uint16_t port;
+  if (!get_endpoint(cx, args[0], address, port, "listen")) {
+    return false;
+  }
+  JS::RootedObject endpoint(cx, &args[0].toObject());
+  JS::RootedValue hostname_value(cx);
+  if (!JS_GetProperty(cx, endpoint, "hostname", &hostname_value)) {
+    return false;
+  }
+  auto hostname = core::encode(cx, hostname_value);
+  if (!hostname.ptr) {
+    return false;
+  }
+  std::string hostname_string(hostname.ptr.get(), hostname.len);
+  JS::RootedObject promise(cx, JS::NewPromiseObject(cx, nullptr));
+  if (!promise) {
+    return false;
+  }
+  args.rval().setObject(*promise);
+
+  wasi_sockets_tcp_own_tcp_socket_t socket;
+  wasi_sockets_tcp_error_code_t error;
+  if (!wasi_sockets_tcp_create_socket_create_tcp_socket(
+          WASI_SOCKETS_NETWORK_IP_ADDRESS_FAMILY_IPV4, &socket, &error)) {
+    return reject_socket_error(cx, promise, "create socket", error);
+  }
+  auto network = wasi_sockets_instance_network_instance_network();
+  wasi_sockets_tcp_ip_socket_address_t socket_address{
+      WASI_SOCKETS_NETWORK_IP_SOCKET_ADDRESS_IPV4,
+      {.ipv4 = {port, {address[0], address[1], address[2], address[3]}}}};
+  if (!wasi_sockets_tcp_method_tcp_socket_start_bind(
+          wasi_sockets_tcp_borrow_tcp_socket(socket),
+          wasi_sockets_network_borrow_network(network), &socket_address,
+          &error)) {
+    wasi_sockets_network_network_drop_own(network);
+    wasi_sockets_tcp_tcp_socket_drop_own(socket);
+    return reject_socket_error(cx, promise, "listen", error);
+  }
+  api::Engine::queue_async_task(js_new<ListenTask>(
+      promise, socket, network, std::move(hostname_string), port));
+  return true;
+}
+
 } // namespace
 
 namespace sturnkey::network {
@@ -528,7 +894,8 @@ bool install(api::Engine *engine) {
   JSContext *cx = engine->cx();
   JS::RootedObject module(cx, JS_NewPlainObject(cx));
   if (!module ||
-      !JS_DefineFunction(cx, module, "connect", connect, 1, JSPROP_ENUMERATE)) {
+      !JS_DefineFunction(cx, module, "connect", connect, 1, JSPROP_ENUMERATE) ||
+      !JS_DefineFunction(cx, module, "listen", listen, 1, JSPROP_ENUMERATE)) {
     return false;
   }
   JS::RootedValue module_value(cx, JS::ObjectValue(*module));

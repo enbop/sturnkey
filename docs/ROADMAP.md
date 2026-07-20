@@ -58,6 +58,8 @@ HTTP request handler.
 
 ### M2: Filesystem
 
+Status: implemented and covered by a capability-scoped dynamic test.
+
 Expose the smallest useful capability-based filesystem API:
 
 ```js
@@ -83,6 +85,9 @@ Requirements:
 
 ### M3: TCP client
 
+Status: implemented for numeric IPv4, including partial I/O, EOF, connection
+errors, and deterministic close.
+
 Add the required `wasi:sockets` interfaces to the component world and expose a
 Promise-based client API:
 
@@ -99,6 +104,8 @@ Start with IP addresses, then add WASI name lookup. Cover partial writes,
 end-of-stream, connection errors, timeouts, and deterministic cleanup.
 
 ### M4: TCP listener and daemon lifecycle
+
+Status: implemented for numeric IPv4 with `accept()` and async iteration.
 
 Expose a listener that owns event-loop interest for its lifetime:
 

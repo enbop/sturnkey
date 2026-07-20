@@ -18,13 +18,15 @@ not provide Node.js or npm compatibility.
 ## Status
 
 Sturnkey is in early development. It currently loads JavaScript dynamically,
-supports the CLI asynchronous lifecycle, and exposes a capability-based
-filesystem API. TCP and HTTP server APIs will follow in tested increments.
+supports the CLI asynchronous lifecycle, and exposes capability-based
+filesystem and asynchronous TCP client/listener APIs. HTTP server APIs and
+network hardening will follow in tested increments.
 
 The `sturnkey:runtime` builtin provides command-line arguments and a
 Promise-based monotonic `sleep()` API. The `sturnkey:fs` builtin provides byte
 and UTF-8 file I/O plus basic directory operations inside Wasmtime preopens.
-Sturnkey does not yet expose socket APIs.
+The `sturnkey:net` builtin supports numeric-IPv4 TCP clients and foreground
+listeners over `wasi:sockets`.
 
 ## Build
 

@@ -29,3 +29,23 @@ wasmtime -S http -S tcp -S inherit-network sturnkey.wasm client.js
 
 `inherit-network` grants the component access to the host network namespace;
 it is materially broader than a directory preopen.
+
+## TCP listeners
+
+`listen({ hostname, port })` asynchronously binds a numeric IPv4 address and
+returns a listener. A pending `accept()` keeps the CLI event loop alive. The
+listener is also an async iterator, which makes a foreground daemon concise:
+
+```js
+import { listen } from "sturnkey:net";
+
+const listener = await listen({ hostname: "127.0.0.1", port: 9000 });
+for await (const connection of listener) {
+  void handle(connection);
+}
+```
+
+Only one accept may be pending at a time. `listener.close()` is idempotent and
+causes the process to exit naturally after other pending work completes. M4
+requires the pending accept to complete before close; cancellation semantics
+are deferred to M5.

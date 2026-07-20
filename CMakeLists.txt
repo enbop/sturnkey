@@ -134,6 +134,17 @@ if(STURNKEY_BUILD_TESTING)
       set_tests_properties(
         tcp-client PROPERTIES PASS_REGULAR_EXPRESSION
                               "tcp client test completed" TIMEOUT 20)
+
+      add_test(
+        NAME tcp-listener
+        COMMAND
+          "${NODE_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/tcp-listener.mjs"
+          "${WASMTIME_EXECUTABLE}" "${STURNKEY_WASM}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/tcp-listener.js")
+      set_tests_properties(
+        tcp-listener PROPERTIES PASS_REGULAR_EXPRESSION
+                                "tcp listener test completed" TIMEOUT 30)
     endif()
   else()
     message(WARNING "Wasmtime not found; runtime tests are disabled")

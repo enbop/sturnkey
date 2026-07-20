@@ -22,8 +22,8 @@ runtime build that loads JavaScript dynamically. Promise-based WASI filesystem,
 TCP, CLI, and HTTP server APIs will follow in small, tested increments.
 
 The current runtime already loads JavaScript at execution time and exposes a
-small `sturnkey:runtime` builtin. It does not yet expose Sturnkey filesystem or
-socket APIs.
+small `sturnkey:runtime` builtin with a Promise-based monotonic `sleep()` API.
+It does not yet expose Sturnkey filesystem or socket APIs.
 
 ## Build
 
@@ -48,8 +48,9 @@ with `v` build an optimized component and publish it in a GitHub release.
 
 ```js
 // main.js
-import { version } from "sturnkey:runtime";
+import { sleep, version } from "sturnkey:runtime";
 
+await sleep(100);
 console.log(`Hello from Sturnkey ${version}`);
 ```
 
@@ -92,6 +93,7 @@ vendor/StarlingMonkey/   Pinned upstream submodule
 See [UPSTREAM.md](UPSTREAM.md) for dependency and update policy.
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the staged implementation plan and
 acceptance criteria.
+See [docs/api/runtime.md](docs/api/runtime.md) for the current JavaScript API.
 
 ## License
 

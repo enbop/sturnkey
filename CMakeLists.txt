@@ -37,7 +37,7 @@ add_custom_command(
   COMMAND
     "${CMAKE_COMMAND}" -E copy_if_different
     "${STARLINGMONKEY_BINARY_DIR}/starling.wasm" "${STURNKEY_WASM}"
-  DEPENDS starling
+  DEPENDS starling "${STARLINGMONKEY_BINARY_DIR}/starling.wasm"
   COMMENT "Creating sturnkey.wasm"
   VERBATIM)
 add_custom_target(sturnkey ALL DEPENDS "${STURNKEY_WASM}")
@@ -66,6 +66,37 @@ if(STURNKEY_BUILD_TESTING)
     set_tests_properties(
       dynamic-js PROPERTIES PASS_REGULAR_EXPRESSION
                             "Hello from Sturnkey 0.1.0")
+
+    add_test(
+      NAME async-sleep
+      COMMAND
+        "${WASMTIME_EXECUTABLE}" -S http --dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${STURNKEY_WASM}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/async-sleep.js")
+    set_tests_properties(
+      async-sleep PROPERTIES PASS_REGULAR_EXPRESSION
+                             "async sleep completed")
+
+    add_test(
+      NAME async-invalid
+      COMMAND
+        "${WASMTIME_EXECUTABLE}" -S http --dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${STURNKEY_WASM}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/async-invalid.js")
+    set_tests_properties(
+      async-invalid PROPERTIES PASS_REGULAR_EXPRESSION
+                               "invalid sleep arguments rejected")
+
+    add_test(
+      NAME async-rejection
+      COMMAND
+        bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/expect-failure.sh"
+        "expected top-level rejection" "${WASMTIME_EXECUTABLE}" -S http --dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${STURNKEY_WASM}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/async-rejection.js")
   else()
     message(WARNING "Wasmtime not found; runtime tests are disabled")
   endif()
